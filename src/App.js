@@ -162,14 +162,15 @@ function App() {
     }
   };
 
-  // Updated Claude AI Integration - using local backend
+  // ✅ FIXED: Updated Claude AI Integration - using Railway backend with proper email handling
   const generateAIRecommendations = async (profile, consultationData) => {
     setIsGeneratingAI(true);
     
     try {
-      console.log('🤖 Calling local backend for AI recommendations...');
+      console.log('🤖 Calling Railway backend for AI recommendations...');
+      console.log('Consultation data being sent:', consultationData);
       
-      const response = await fetch('http://localhost:3001/api/generate-recommendations', {
+      const response = await fetch('https://scent-quiz-backend-production.up.railway.app/api/generate-recommendations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -180,8 +181,12 @@ function App() {
         })
       });
 
+      console.log('Response status:', response.status);
+
       if (!response.ok) {
-        throw new Error(`Backend API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error('Backend error response:', errorText);
+        throw new Error(`Backend API error: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
@@ -195,7 +200,7 @@ function App() {
       
     } catch (error) {
       console.error('❌ Error generating AI recommendations:', error);
-      alert('Error generating AI recommendations. Make sure the backend server is running on port 3001.');
+      alert(`Error generating AI recommendations: ${error.message}\n\nPlease check your internet connection and try again.`);
       return null;
     } finally {
       setIsGeneratingAI(false);
@@ -253,25 +258,32 @@ function App() {
     });
   };
 
+  // ✅ FIXED: Updated consultation completion with proper email handling
   const handleConsultationNext = async () => {
     if (currentConsultationQuestion < consultationQuestions.length - 1) {
       setCurrentConsultationQuestion(currentConsultationQuestion + 1);
     } else {
       setIsSubmitting(true);
       
+      // ✅ CRITICAL FIX: Add email to consultation data for backend
+      const consultationWithEmail = {
+        ...consultationResponses,
+        email: userEmail
+      };
+      
       // Submit full consultation data to Google Sheets
       await submitToGoogleForms({
         email: userEmail,
         source: 'full_consultation',
         teaserScores: scores,
-        consultationData: consultationResponses
+        consultationData: consultationWithEmail  // ✅ FIXED: Include email
       });
 
       // Store locally as backup
       const consultations = JSON.parse(localStorage.getItem('fullConsultations') || '[]');
       consultations.push({
         email: userEmail,
-        responses: consultationResponses,
+        responses: consultationWithEmail,  // ✅ FIXED: Include email
         teaserScores: scores,
         date: new Date().toISOString()
       });
@@ -281,9 +293,9 @@ function App() {
       setShowFullConsultation(false);
       setShowThankYou(true);
 
-      // Generate AI recommendations
+      // ✅ FIXED: Generate AI recommendations with email included
       const profile = generatePersonalizedResult().profile;
-      const recommendations = await generateAIRecommendations(profile, consultationResponses);
+      const recommendations = await generateAIRecommendations(profile, consultationWithEmail);
       
       if (recommendations) {
         setAiRecommendations(recommendations);
@@ -383,7 +395,7 @@ function App() {
     setAiRecommendations(null);
   };
 
-  // AI Results screen
+  // ✅ Enhanced AI Results screen
   if (showAIResults && aiRecommendations) {
     return (
       <div className="App">
@@ -411,8 +423,9 @@ function App() {
           </div>
 
           <div className="cta-section">
-            <h3>Save Your Recommendations</h3>
-            <p>Your personalized recommendations have been sent to: {userEmail}</p>
+            <h3>📧 Check Your Email!</h3>
+            <p>Your personalized recommendations have been sent to: <strong>{userEmail}</strong></p>
+            <p>You'll receive a beautiful email with all your recommendations and shopping tips!</p>
             <button onClick={restart} className="restart-btn">
               Take Quiz Again
             </button>
@@ -422,7 +435,7 @@ function App() {
     );
   }
 
-  // Thank you screen
+  // ✅ Enhanced Thank you screen
   if (showThankYou) {
     return (
       <div className="App">
@@ -441,7 +454,8 @@ function App() {
               <ul>
                 <li>✅ Your data is saved in Google Sheets</li>
                 <li>🤖 AI is creating personalized recommendations</li>
-                <li>📧 Results will be displayed shortly!</li>
+                <li>📧 Beautiful email being prepared for: {userEmail}</li>
+                <li>🚀 Using Railway backend for processing</li>
               </ul>
             </div>
           </div>
@@ -607,7 +621,7 @@ function App() {
             >
               🤖 Get AI Consultation - Free
             </button>
-            <p className="delivery-note">AI recommendations generated instantly!</p>
+            <p className="delivery-note">AI recommendations generated instantly + emailed to you!</p>
             <button onClick={restart} className="restart-btn">
               Take Quiz Again
             </button>

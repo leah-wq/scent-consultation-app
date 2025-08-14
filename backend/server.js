@@ -1,51 +1,70 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
 
-// Log all incoming requests
-app.use((req, res, next) => {
-  console.log(`📨 ${req.method} ${req.path}`);
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+// Email transporter setup
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_APP_PASSWORD
   }
-  next();
 });
 
-// Test data storage (in production, use a real database)
-let consultations = [];
-let webVitals = [];
+// Verify email configuration on startup
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('❌ Email configuration error:', error);
+  } else {
+    console.log('✅ Email server ready');
+  }
+});
 
 // Generate AI recommendations using Claude
-async function generateAIRecommendations(consultationData) {
+async function generateAIRecommendations(profile, consultationData) {
   try {
-    console.log('🤖 Calling Claude API...');
-    console.log('🔑 API Key exists:', !!process.env.CLAUDE_API_KEY);
-    console.log('🔑 API Key length:', process.env.CLAUDE_API_KEY ? process.env.CLAUDE_API_KEY.length : 0);
-    
-    const prompt = `Based on this fragrance consultation data, provide personalized scent recommendations:
+    const prompt = `You are an expert perfumer and fragrance consultant. Based on the following user profile and consultation responses, provide 6 personalized fragrance recommendations.
 
-Consultation Data:
-${JSON.stringify(consultationData, null, 2)}
+SCENT PROFILE:
+- Energy Level: ${profile.energy}/10 (1=calming, 10=energizing)
+- Complexity: ${profile.complexity}/10 (1=simple, 10=layered)
+- Warmth: ${profile.warmth}/10 (1=cool/fresh, 10=warm/cozy)
+- Boldness: ${profile.boldness}/10 (1=subtle, 10=statement-making)
+- Time Preference: ${profile.timePreference}/10 (1=day, 10=evening)
+- Nature Connection: ${profile.natureConnection}/10 (1=urban, 10=natural)
 
-Please provide:
-1. 3-5 specific fragrance recommendations with detailed explanations
-2. Why each recommendation matches their preferences
-3. Seasonal wearing suggestions
-4. Layering tips if applicable
+CONSULTATION RESPONSES:
+${Object.entries(consultationData).map(([key, value]) => 
+  `${key.replace(/_/g, ' ')}: ${value}`
+).join('\n')}
 
-Format as detailed, helpful recommendations.`;
+Please provide exactly 6 fragrance recommendations in this JSON format:
+{
+  "recommendations": [
+    {
+      "name": "Fragrance Name",
+      "brand": "Brand Name",
+      "description": "2-3 sentence description explaining why this fragrance matches their personality",
+      "notes": ["top note", "heart note", "base note"],
+      "priceRange": "$XX-XX",
+      "scenario": "When to wear this fragrance",
+      "reasoning": "Why this matches their specific profile and memories"
+    }
+  ],
+  "summary": "A 2-3 sentence summary of their overall scent personality",
+  "shoppingTips": "3-4 specific tips for testing and buying fragrances"
+}
 
-    console.log('📤 Sending request to Claude API...');
-    
+Only recommend real, currently available fragrances from reputable brands. Focus on matching their emotional memories and scent profile dimensions.`;
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -54,271 +73,244 @@ Format as detailed, helpful recommendations.`;
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-3-7-sonnet-20250219',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
       })
     });
 
-    console.log('📥 Response status:', response.status);
-    console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()));
-
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Claude API error response:', errorText);
-      throw new Error(`Claude API error: ${response.status} - ${errorText}`);
+      throw new Error(`Claude API error: ${response.status}`);
     }
 
     const data = await response.json();
-    console.log('✅ Claude API response received');
-    console.log('📄 Response structure:', Object.keys(data));
+    const responseText = data.content[0].text;
     
-    return {
-      error: false,
-      message: data.content[0].text,
-      details: 'AI recommendations generated successfully'
-    };
-
+    // Extract JSON from Claude's response
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const recommendations = JSON.parse(jsonMatch[0]);
+      console.log('✅ Claude AI recommendations generated successfully');
+      return recommendations;
+    }
+    
+    throw new Error('Could not parse Claude response');
   } catch (error) {
-    console.error('❌ Error in generateAIRecommendations:', error.message);
-    console.error('❌ Full error:', error);
-    return {
-      error: true,
-      message: error.message,
-      details: 'Failed to generate AI recommendations'
-    };
+    console.error('❌ Error generating AI recommendations:', error);
+    throw error;
   }
 }
 
-// Routes
+// Generate beautiful HTML email template
+function generateEmailHTML(recommendations, profile, userEmail) {
+  const recList = recommendations.recommendations.map((rec, index) => `
+    <div style="border: 1px solid #e5e7eb; border-radius: 12px; padding: 25px; margin: 20px 0; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+      <div style="display: flex; align-items: center; margin-bottom: 15px;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 15px;">
+          <span style="color: white; font-weight: bold; font-size: 14px;">${index + 1}</span>
+        </div>
+        <h3 style="color: #1f2937; margin: 0; font-size: 20px; font-weight: 600;">${rec.name}</h3>
+      </div>
+      <p style="color: #6b7280; margin: 0 0 12px 0; font-style: italic; font-size: 16px;">${rec.brand} | ${rec.priceRange}</p>
+      <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.6; font-size: 15px;">${rec.description}</p>
+      <div style="background: white; padding: 15px; border-radius: 8px; margin: 15px 0;">
+        <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;"><strong style="color: #374151;">Notes:</strong> ${rec.notes.join(', ')}</p>
+        <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;"><strong style="color: #374151;">Perfect for:</strong> ${rec.scenario}</p>
+      </div>
+      <p style="color: #4f46e5; margin: 0; font-size: 14px; font-weight: 500;"><strong>Why it's perfect for you:</strong> ${rec.reasoning}</p>
+    </div>
+  `).join('');
 
-// Health check
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Your Scent Story</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8fafc;">
+      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; border-radius: 20px 20px 0 0; text-align: center;">
+        <h1 style="color: white; margin: 0 0 10px 0; font-size: 32px; font-weight: 700;">✨ Your Scent Story ✨</h1>
+        <p style="color: rgba(255,255,255,0.9); font-size: 18px; margin: 0;">Crafted by AI, perfected for you</p>
+      </div>
+
+      <div style="background: white; padding: 30px; border-radius: 0 0 20px 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <div style="background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); padding: 25px; border-radius: 15px; margin-bottom: 30px; border-left: 5px solid #667eea;">
+          <h2 style="color: #374151; margin-top: 0; font-size: 24px;">Your Scent Personality</h2>
+          <p style="color: #4b5563; font-size: 16px; line-height: 1.7; margin-bottom: 20px;">${recommendations.summary}</p>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px;">
+            <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 24px; font-weight: bold; color: #667eea;">${profile.energy}/10</div>
+              <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Energy</div>
+            </div>
+            <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 24px; font-weight: bold; color: #667eea;">${profile.complexity}/10</div>
+              <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Complexity</div>
+            </div>
+            <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 24px; font-weight: bold; color: #667eea;">${profile.warmth}/10</div>
+              <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Warmth</div>
+            </div>
+            <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e5e7eb;">
+              <div style="font-size: 24px; font-weight: bold; color: #667eea;">${profile.boldness}/10</div>
+              <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Boldness</div>
+            </div>
+          </div>
+        </div>
+
+        <h2 style="color: #374151; font-size: 28px; margin-bottom: 25px; text-align: center;">Your Personalized Recommendations</h2>
+        ${recList}
+
+        <div style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); padding: 25px; border-radius: 15px; margin-top: 30px; border: 1px solid #93c5fd;">
+          <h3 style="color: #1e40af; margin-top: 0; font-size: 20px;">💡 Expert Shopping Tips</h3>
+          <p style="color: #1e3a8a; margin-bottom: 0; font-size: 15px; line-height: 1.6;">${recommendations.shoppingTips}</p>
+        </div>
+
+        <div style="text-align: center; margin-top: 40px; padding: 30px; background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%); border-radius: 15px;">
+          <h3 style="color: #374151; margin: 0 0 15px 0; font-size: 22px;">🌸 Your Scent Journey Begins</h3>
+          <p style="color: #6b7280; margin: 0 0 20px 0; font-size: 16px;">Ready to discover your signature scent? Start with samples and let your story unfold.</p>
+          <div style="font-size: 14px; color: #9ca3af; border-top: 1px solid #d1d5db; padding-top: 20px; margin-top: 20px;">
+            <p style="margin: 0;">Questions about your recommendations? Simply reply to this email.</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+// Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ message: 'Scent Consultation API is running!' });
+  res.json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    claudeApiConfigured: !!process.env.CLAUDE_API_KEY,
+    emailConfigured: !!(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD)
+  });
 });
 
-// Submit consultation
-app.post('/api/consultation', async (req, res) => {
-  try {
-    const consultation = {
-      id: Date.now(),
-      timestamp: new Date().toISOString(),
-      ...req.body
-    };
-    
-    consultations.push(consultation);
-    
-    res.json({ 
-      success: true, 
-      message: 'Consultation submitted successfully',
-      consultationId: consultation.id
-    });
-  } catch (error) {
-    console.error('Error submitting consultation:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to submit consultation' 
-    });
-  }
-});
-
-// Generate AI recommendations endpoint
+// Generate recommendations endpoint
 app.post('/api/generate-recommendations', async (req, res) => {
   try {
-    console.log('🔍 Starting AI recommendation generation...');
-    console.log('📝 Request body:', JSON.stringify(req.body, null, 2));
+    const { profile, consultationData } = req.body;
     
-    const { error, message, details } = await generateAIRecommendations(req.body);
-    
-    if (error) {
-      console.error('❌ AI recommendations error:', error);
-      return res.status(500).json({ 
-        error: true, 
-        message: error.message,
-        details: 'Check server console for more information'
-      });
-    }
-    
-    console.log('✅ AI recommendations generated successfully');
-    
-    // Parse the AI response into structured data
-    const aiText = message;
-    const recommendations = [];
-    
-    // Split by numbered sections (1., 2., 3., etc.) or ### headers
-    let sections = aiText.split(/(?:\d+\.\s*\*\*|###\s*\d+\.)/);
-    
-    // If no numbered sections found, try alternative parsing
-    if (sections.length < 2) {
-      sections = aiText.split(/(?=\*\*[A-Z].*?\*\*.*?\$)/);
-    }
-    
-    for (let i = 1; i < sections.length && i <= 5; i++) {
-      const section = sections[i].trim();
-      if (!section) continue;
-      
-      // Extract fragrance name (usually in first line with **)
-      const nameMatch = section.match(/\*\*(.*?)\*\*/);
-      let name = nameMatch ? nameMatch[1].trim() : `Recommendation ${i}`;
-      
-      // Extract price
-      const priceMatch = section.match(/\(\$\d+[^)]*\)/);
-      const price = priceMatch ? priceMatch[0] : '';
-      
-      // Clean name and add price
-      name = name.replace(/\(\$[^)]*\)/g, '').trim();
-      if (price) name += ` ${price}`;
-      
-      // Extract brand from common fragrance houses
-      let brand = "Premium Fragrance";
-      const nameLC = name.toLowerCase();
-      if (nameLC.includes('byredo')) brand = "Byredo";
-      else if (nameLC.includes('tom ford')) brand = "Tom Ford";
-      else if (nameLC.includes('maison francis') || nameLC.includes('mfk')) brand = "Maison Francis Kurkdjian";
-      else if (nameLC.includes('profumum')) brand = "Profumum Roma";
-      else if (nameLC.includes('hermès') || nameLC.includes('hermes')) brand = "Hermès";
-      else if (nameLC.includes('acqua di parma')) brand = "Acqua di Parma";
-      else if (nameLC.includes('xerjoff')) brand = "Xerjoff";
-      else if (nameLC.includes('parfums de marly')) brand = "Parfums de Marly";
-      
-      // Extract "Why it matches" or "Profile Match" section
-      const whyMatch = section.match(/\*\*Why it matches:\*\*(.*?)(?=\*\*|$)/s);
-      const profileMatch = section.match(/\*\*Profile Match:\*\*(.*?)(?=\*\*|$)/s);
-      const reasoningMatch = section.match(/\*\*Why It's Perfect For You:\*\*(.*?)(?=\*\*|$)/s);
-      
-      let description = "";
-      let reasoning = "";
-      
-      if (whyMatch) {
-        let fullText = whyMatch[1].trim();
-        // Split at sentence boundaries, not arbitrary character limits
-        const sentences = fullText.split(/(?<=[.!?])\s+/);
-        description = sentences.slice(0, 2).join(' ');
-        reasoning = sentences.slice(2, 4).join(' ') || "Perfect for your unique fragrance preferences";
-      } else if (profileMatch) {
-        let fullText = profileMatch[1].trim();
-        const sentences = fullText.split(/(?<=[.!?])\s+/);
-        description = sentences.slice(0, 2).join(' ');
-        reasoning = sentences.slice(2, 4).join(' ') || "Selected based on your consultation responses";
-      } else {
-        // Take meaningful paragraphs
-        const lines = section.split('\n').filter(line => line.trim() && !line.includes('**'));
-        const meaningfulText = lines.join(' ').trim();
-        const sentences = meaningfulText.split(/(?<=[.!?])\s+/);
-        description = sentences.slice(0, 2).join(' ');
-        reasoning = sentences.slice(2, 4).join(' ') || "Matches your consultation preferences perfectly";
-      }
-      
-      // Ensure proper sentence endings
-      if (description && !description.match(/[.!?]$/)) {
-        // Find the last complete sentence
-        const lastSentence = description.lastIndexOf('.');
-        if (lastSentence > 50) {
-          description = description.substring(0, lastSentence + 1);
-        } else {
-          description += '.';
-        }
-      }
-      
-      if (reasoning && !reasoning.match(/[.!?]$/)) {
-        const lastSentence = reasoning.lastIndexOf('.');
-        if (lastSentence > 30) {
-          reasoning = reasoning.substring(0, lastSentence + 1);
-        } else {
-          reasoning += '.';
-        }
-      }
-      
-      // Extract notes if mentioned
-      const notes = ["AI-Selected", "Premium"];
-      if (section.toLowerCase().includes('mediterranean')) notes.push("Mediterranean");
-      if (section.toLowerCase().includes('woody')) notes.push("Woody");
-      if (section.toLowerCase().includes('citrus')) notes.push("Citrus");
-      if (section.toLowerCase().includes('spicy')) notes.push("Spicy");
-      
-      recommendations.push({
-        name: name,
-        brand: brand,
-        description: description,
-        notes: notes,
-        scenario: "Perfect for your lifestyle and preferences",
-        reasoning: reasoning
-      });
-    }
-    
-    // Fallback if no recommendations found
-    if (recommendations.length === 0) {
-      recommendations.push({
-        name: "Your Personalized AI Recommendations",
-        brand: "Claude AI",
-        description: aiText.substring(0, 400) + "...",
-        notes: ["Personalized", "AI-Selected"],
-        scenario: "Your unique preferences",
-        reasoning: "Generated specifically based on your consultation responses and fragrance profile"
-      });
+    if (!profile || !consultationData) {
+      return res.status(400).json({ error: 'Missing required data' });
     }
 
-    res.json({ 
+    console.log('🤖 Generating AI recommendations...');
+    
+    // Generate recommendations using Claude
+    const recommendations = await generateAIRecommendations(profile, consultationData);
+    
+    // Send email with recommendations
+    if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
+      try {
+        const userEmail = consultationData.email || req.body.email;
+        
+        if (userEmail) {
+          console.log('📧 Sending email to:', userEmail);
+          
+          const emailHTML = generateEmailHTML(recommendations, profile, userEmail);
+          
+          const mailOptions = {
+            from: `"Scent Story" <${process.env.EMAIL_USER}>`,
+            to: userEmail,
+            subject: '✨ Your Personalized Scent Story is Ready!',
+            html: emailHTML
+          };
+
+          await transporter.sendMail(mailOptions);
+          console.log('✅ Email sent successfully to:', userEmail);
+        }
+      } catch (emailError) {
+        console.error('❌ Error sending email:', emailError);
+        // Don't fail the whole request if email fails
+      }
+    }
+    
+    res.json({
       success: true,
-      recommendations: {
-        summary: "Based on your consultation responses, here are your personalized fragrance recommendations:",
-        shoppingTips: "Test fragrances on your skin and let them develop for at least 30 minutes. Each fragrance interacts uniquely with your body chemistry.",
-        recommendations: recommendations
-      }
+      message: 'Recommendations generated and email sent',
+      recommendations: recommendations
     });
+
   } catch (error) {
-    console.error('❌ Error in /api/generate-recommendations:', error);
-    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error in recommendations endpoint:', error);
     res.status(500).json({ 
-      error: true, 
-      message: error.message,
-      details: 'Check server console for more information'
+      error: 'Failed to generate recommendations',
+      message: error.message 
     });
   }
 });
 
-// Get all consultations
-app.get('/api/consultations', (req, res) => {
-  res.json(consultations);
-});
-
-// Report web vitals
-app.post('/api/web-vitals', (req, res) => {
+// Test email endpoint - GET version for browser testing
+app.get('/api/test-email', async (req, res) => {
   try {
-    const vital = {
-      id: Date.now(),
-      timestamp: new Date().toISOString(),
-      ...req.body
+    const testEmail = 'lwelsch1@gmail.com'; // Use your Gmail for testing
+    
+    const testMailOptions = {
+      from: `"Scent Story" <${process.env.EMAIL_USER}>`,
+      to: testEmail,
+      subject: 'Test Email from Scent Story',
+      html: `
+        <h2>✅ Email Configuration Working!</h2>
+        <p>Your email setup is working correctly.</p>
+        <p>Sent at: ${new Date().toISOString()}</p>
+      `
     };
-    
-    webVitals.push(vital);
-    
-    res.json({ 
-      success: true, 
-      message: 'Web vital recorded' 
-    });
+
+    await transporter.sendMail(testMailOptions);
+    res.json({ success: true, message: 'Test email sent successfully to ' + testEmail });
   } catch (error) {
-    console.error('Error recording web vital:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to record web vital' 
-    });
+    console.error('❌ Test email failed:', error);
+    res.status(500).json({ error: 'Failed to send test email', details: error.message });
   }
 });
 
-// Get web vitals
-app.get('/api/web-vitals', (req, res) => {
-  res.json(webVitals);
+// Test email endpoint - POST version
+app.post('/api/test-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    const testMailOptions = {
+      from: `"Scent Story" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Test Email from Scent Story',
+      html: `
+        <h2>✅ Email Configuration Working!</h2>
+        <p>Your email setup is working correctly.</p>
+        <p>Sent at: ${new Date().toISOString()}</p>
+      `
+    };
+
+    await transporter.sendMail(testMailOptions);
+    res.json({ success: true, message: 'Test email sent successfully' });
+  } catch (error) {
+    console.error('❌ Test email failed:', error);
+    res.status(500).json({ error: 'Failed to send test email', details: error.message });
+  }
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Server Error:', error);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found' });
 });
 
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`🤖 Claude API configured: ${!!process.env.CLAUDE_API_KEY}`);
+  console.log(`📧 Email configured: ${!!(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD)}`);
   console.log(`📊 Node.js version: ${process.version}`);
 });
-
-module.exports = app;
