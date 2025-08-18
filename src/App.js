@@ -208,17 +208,17 @@ function App() {
     }
   };
 
-  // UPDATED: Personal Perfumer Integration with LOCAL backend for testing
+  // PRODUCTION: Personal Perfumer Integration with Railway backend
   const generateAIRecommendations = async (profile, consultationData) => {
     setIsGeneratingAI(true);
     
     try {
-      console.log('🌸 Calling LOCAL backend for personalized perfumer recommendations...');
+      console.log('🌸 Calling Railway backend for personalized perfumer recommendations...');
       console.log('Profile with gender:', profile);
       console.log('Consultation data being sent:', consultationData);
       
-      // CHANGED: Using local backend URL for testing
-      const response = await fetch('http://localhost:8080/api/generate-recommendations', {
+      // PRODUCTION: Using Railway backend URL
+      const response = await fetch('https://scent-quiz-backend-production.up.railway.app/api/generate-recommendations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -558,7 +558,7 @@ function App() {
                 <li>✅ Your unique preferences are captured and analyzed</li>
                 <li>🌸 Your personal perfumer is creating personalized recommendations</li>
                 <li>📧 Email being prepared for: {userEmail}</li>
-                <li>🚀 Using local backend for testing</li>
+                <li>🚀 Using Railway backend for processing</li>
               </ul>
             </div>
           </div>
