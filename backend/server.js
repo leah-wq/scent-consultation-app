@@ -28,10 +28,15 @@ transporter.verify((error, success) => {
   }
 });
 
-// Generate AI recommendations using Claude
+// Enhanced Generate Personal Perfumer recommendations using Claude with gender awareness
 async function generateAIRecommendations(profile, consultationData) {
   try {
-    const prompt = `You are an expert perfumer and fragrance consultant. Based on the following user profile and consultation responses, provide 6 personalized fragrance recommendations.
+    // Extract gender information from multiple sources
+    const genderFromTeaser = profile.gender || 'not specified';
+    const genderFromConsultation = consultationData.gender_expression || 'not specified';
+    const genderStyle = profile.genderStyle || 'not specified';
+    
+    const prompt = `You are an expert perfumer and fragrance consultant specializing in gender-inclusive fragrance recommendations. Based on the following user profile and consultation responses, provide 6 personalized fragrance recommendations that respect their gender expression and scent preferences.
 
 SCENT PROFILE:
 - Energy Level: ${profile.energy}/10 (1=calming, 10=energizing)
@@ -41,10 +46,26 @@ SCENT PROFILE:
 - Time Preference: ${profile.timePreference}/10 (1=day, 10=evening)
 - Nature Connection: ${profile.natureConnection}/10 (1=urban, 10=natural)
 
+GENDER EXPRESSION:
+- Teaser Quiz Gender: ${genderFromTeaser}
+- Gender Style: ${genderStyle}
+- Consultation Gender Preference: ${genderFromConsultation}
+
 CONSULTATION RESPONSES:
 ${Object.entries(consultationData).map(([key, value]) => 
   `${key.replace(/_/g, ' ')}: ${value}`
 ).join('\n')}
+
+IMPORTANT GUIDELINES:
+- Respect their gender expression preferences completely
+- If they chose "feminine," include more traditionally feminine fragrances (florals, sweet, powdery notes)
+- If they chose "masculine," include more traditionally masculine fragrances (woody, spicy, fresh notes)
+- If they chose "unisex," focus on sophisticated gender-neutral options
+- If they chose "fluid" or "nonbinary," include diverse options across the spectrum that transcend traditional categories
+- If they prefer not to specify, focus purely on their scent profile dimensions without gender assumptions
+- Always include at least 1-2 niche/artisanal options alongside mainstream brands
+- Consider their budget preference from the consultation
+- Ensure recommendations span different occasions and moods
 
 Please provide exactly 6 fragrance recommendations in this JSON format:
 {
@@ -52,18 +73,19 @@ Please provide exactly 6 fragrance recommendations in this JSON format:
     {
       "name": "Fragrance Name",
       "brand": "Brand Name",
-      "description": "2-3 sentence description explaining why this fragrance matches their personality",
+      "description": "2-3 sentence description explaining why this fragrance matches their personality and gender expression",
       "notes": ["top note", "heart note", "base note"],
       "priceRange": "$XX-XX",
       "scenario": "When to wear this fragrance",
-      "reasoning": "Why this matches their specific profile and memories"
+      "reasoning": "Why this matches their specific profile, memories, and gender preferences",
+      "genderAppeal": "feminine/masculine/unisex - explain why this fits their gender expression"
     }
   ],
-  "summary": "A 2-3 sentence summary of their overall scent personality",
-  "shoppingTips": "3-4 specific tips for testing and buying fragrances"
+  "summary": "A 2-3 sentence summary of their overall scent personality and how gender expression influences their fragrance choices",
+  "shoppingTips": "3-4 specific tips for testing and buying fragrances that align with their gender preferences and scent profile"
 }
 
-Only recommend real, currently available fragrances from reputable brands. Focus on matching their emotional memories and scent profile dimensions.`;
+Only recommend real, currently available fragrances from reputable brands. Focus on matching their emotional memories, scent profile dimensions, AND respecting their gender expression preferences. Make each recommendation feel personal and meaningful.`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -74,7 +96,7 @@ Only recommend real, currently available fragrances from reputable brands. Focus
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
+        max_tokens: 2500,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -90,19 +112,25 @@ Only recommend real, currently available fragrances from reputable brands. Focus
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const recommendations = JSON.parse(jsonMatch[0]);
-      console.log('✅ Claude AI recommendations generated successfully');
+      console.log('✅ Personal perfumer recommendations generated successfully');
       return recommendations;
     }
     
     throw new Error('Could not parse Claude response');
   } catch (error) {
-    console.error('❌ Error generating AI recommendations:', error);
+    console.error('❌ Error generating personal perfumer recommendations:', error);
     throw error;
   }
 }
 
-// Generate beautiful HTML email template
+// Enhanced Generate beautiful HTML email template with gender considerations
 function generateEmailHTML(recommendations, profile, userEmail) {
+  const genderNote = profile.gender && profile.gender !== 'not specified' 
+    ? `<p style="color: rgba(255,255,255,0.9); font-style: italic; text-align: center; margin-top: 10px; font-size: 16px;">
+         Recommendations curated for your ${profile.gender} scent preferences
+       </p>` 
+    : '';
+
   const recList = recommendations.recommendations.map((rec, index) => `
     <div style="border: 1px solid #e5e7eb; border-radius: 12px; padding: 25px; margin: 20px 0; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
       <div style="display: flex; align-items: center; margin-bottom: 15px;">
@@ -116,6 +144,7 @@ function generateEmailHTML(recommendations, profile, userEmail) {
       <div style="background: white; padding: 15px; border-radius: 8px; margin: 15px 0;">
         <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;"><strong style="color: #374151;">Notes:</strong> ${rec.notes.join(', ')}</p>
         <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;"><strong style="color: #374151;">Perfect for:</strong> ${rec.scenario}</p>
+        ${rec.genderAppeal ? `<p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;"><strong style="color: #374151;">Gender Appeal:</strong> ${rec.genderAppeal}</p>` : ''}
       </div>
       <p style="color: #4f46e5; margin: 0; font-size: 14px; font-weight: 500;"><strong>Why it's perfect for you:</strong> ${rec.reasoning}</p>
     </div>
@@ -132,7 +161,8 @@ function generateEmailHTML(recommendations, profile, userEmail) {
     <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8fafc;">
       <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; border-radius: 20px 20px 0 0; text-align: center;">
         <h1 style="color: white; margin: 0 0 10px 0; font-size: 32px; font-weight: 700;">✨ Your Scent Story ✨</h1>
-        <p style="color: rgba(255,255,255,0.9); font-size: 18px; margin: 0;">Crafted by AI, perfected for you</p>
+        <p style="color: rgba(255,255,255,0.9); font-size: 18px; margin: 0;">Crafted by your personal perfumer</p>
+        ${genderNote}
       </div>
 
       <div style="background: white; padding: 30px; border-radius: 0 0 20px 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
@@ -159,7 +189,7 @@ function generateEmailHTML(recommendations, profile, userEmail) {
           </div>
         </div>
 
-        <h2 style="color: #374151; font-size: 28px; margin-bottom: 25px; text-align: center;">Your Personalized Recommendations</h2>
+        <h2 style="color: #374151; font-size: 28px; margin-bottom: 25px; text-align: center;">Your Personal Perfumer's Recommendations</h2>
         ${recList}
 
         <div style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); padding: 25px; border-radius: 15px; margin-top: 30px; border: 1px solid #93c5fd;">
@@ -190,7 +220,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Generate recommendations endpoint
+// Enhanced Generate recommendations endpoint with RELIABLE business email copy
 app.post('/api/generate-recommendations', async (req, res) => {
   try {
     const { profile, consultationData } = req.body;
@@ -199,45 +229,87 @@ app.post('/api/generate-recommendations', async (req, res) => {
       return res.status(400).json({ error: 'Missing required data' });
     }
 
-    console.log('🤖 Generating AI recommendations...');
+    console.log('🌸 Generating personal perfumer recommendations...');
+    console.log('Profile with gender:', profile);
+    console.log('Consultation data:', consultationData);
     
-    // Generate recommendations using Claude
+    // Generate recommendations using Claude with gender context
     const recommendations = await generateAIRecommendations(profile, consultationData);
     
-    // Send email with recommendations
+    // Send email with personal perfumer recommendations
     if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
       try {
         const userEmail = consultationData.email || req.body.email;
         
         if (userEmail) {
-          console.log('📧 Sending email to:', userEmail);
+          console.log('📧 Sending personal perfumer email to:', userEmail);
+          console.log('📧 Also sending business copy to: leah@habit.paris');
           
           const emailHTML = generateEmailHTML(recommendations, profile, userEmail);
           
-          const mailOptions = {
+          // FIXED: Send to user with BCC to business email
+          const userMailOptions = {
             from: `"Scent Story" <${process.env.EMAIL_USER}>`,
             to: userEmail,
-            subject: '✨ Your Personalized Scent Story is Ready!',
+            bcc: 'leah@habit.paris', // This ensures you get a copy of every email
+            subject: '✨ Your Personal Perfumer Recommendations are Ready!',
             html: emailHTML
           };
 
-          await transporter.sendMail(mailOptions);
-          console.log('✅ Email sent successfully to:', userEmail);
+          await transporter.sendMail(userMailOptions);
+          console.log('✅ Personal perfumer email sent successfully to:', userEmail);
+          console.log('✅ Business copy sent via BCC to: leah@habit.paris');
+
+          // ALSO send a separate business summary for your records
+          const businessSummaryOptions = {
+            from: `"Scent Story" <${process.env.EMAIL_USER}>`,
+            to: 'leah@habit.paris',
+            subject: `📋 New Consultation: ${userEmail}`,
+            html: `
+              <div style="padding: 20px; background: #f3f4f6; border-radius: 10px; font-family: Arial, sans-serif; margin: 20px 0;">
+                <h2 style="color: #374151; margin-top: 0;">🌸 New Personal Perfumer Consultation</h2>
+                <div style="background: white; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                  <p style="margin: 5px 0;"><strong>Participant:</strong> ${userEmail}</p>
+                  <p style="margin: 5px 0;"><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+                  <p style="margin: 5px 0;"><strong>Gender Preference:</strong> ${profile.gender || 'Not specified'}</p>
+                </div>
+                <div style="background: white; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                  <h4 style="margin-top: 0; color: #374151;">Scent Profile:</h4>
+                  <ul style="margin: 10px 0;">
+                    <li>Energy: ${profile.energy}/10</li>
+                    <li>Complexity: ${profile.complexity}/10</li>
+                    <li>Warmth: ${profile.warmth}/10</li>
+                    <li>Boldness: ${profile.boldness}/10</li>
+                    <li>Nature Connection: ${profile.natureConnection}/10</li>
+                  </ul>
+                </div>
+                <div style="background: white; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                  <p style="margin: 5px 0;"><strong>Budget:</strong> ${consultationData.scent_budget || 'Not specified'}</p>
+                  <p style="margin: 5px 0;"><strong>Gender Expression:</strong> ${consultationData.gender_expression || 'Not specified'}</p>
+                </div>
+                <hr style="margin: 20px 0;">
+                <p style="font-size: 12px; color: #6b7280; margin: 0;">Note: The participant also received the full recommendation email with their personalized results (you should have received a BCC copy).</p>
+              </div>
+            `
+          };
+
+          await transporter.sendMail(businessSummaryOptions);
+          console.log('✅ Business summary email sent to: leah@habit.paris');
         }
       } catch (emailError) {
-        console.error('❌ Error sending email:', emailError);
+        console.error('❌ Error sending emails:', emailError);
         // Don't fail the whole request if email fails
       }
     }
     
     res.json({
       success: true,
-      message: 'Recommendations generated and email sent',
+      message: 'Personal perfumer recommendations generated and emails sent',
       recommendations: recommendations
     });
 
   } catch (error) {
-    console.error('❌ Error in recommendations endpoint:', error);
+    console.error('❌ Error in personal perfumer recommendations endpoint:', error);
     res.status(500).json({ 
       error: 'Failed to generate recommendations',
       message: error.message 
@@ -248,7 +320,7 @@ app.post('/api/generate-recommendations', async (req, res) => {
 // Test email endpoint - GET version for browser testing
 app.get('/api/test-email', async (req, res) => {
   try {
-    const testEmail = 'lwelsch1@gmail.com'; // Use your Gmail for testing
+    const testEmail = 'lwelsch1@gmail.com';
     
     const testMailOptions = {
       from: `"Scent Story" <${process.env.EMAIL_USER}>`,
@@ -312,5 +384,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`🤖 Claude API configured: ${!!process.env.CLAUDE_API_KEY}`);
   console.log(`📧 Email configured: ${!!(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD)}`);
+  console.log(`🌸 Personal perfumer recommendations: ENABLED`);
+  console.log(`📋 Business email copy: leah@habit.paris (BCC + Summary)`);
   console.log(`📊 Node.js version: ${process.version}`);
 });

@@ -11,6 +11,10 @@ function App() {
     timePreference: 5,
     natureConnection: 5
   });
+  const [userProfile, setUserProfile] = useState({
+    gender: null,
+    genderStyle: null
+  });
   const [showEmailCapture, setShowEmailCapture] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [showFullConsultation, setShowFullConsultation] = useState(false);
@@ -77,10 +81,52 @@ function App() {
         { text: "Warm, comfortable space with personal touches", scores: { warmth: 8, complexity: 6, boldness: 4 } },
         { text: "Sleek, modern setup with latest technology", scores: { complexity: 5, boldness: 6, energy: 7 } }
       ]
+    },
+    {
+      question: "How do you like to express your identity through scent?",
+      options: [
+        { 
+          text: "Feminine and elegant - embracing floral and delicate notes", 
+          scores: { warmth: 6, complexity: 5 },
+          gender: "feminine",
+          genderStyle: "classic_feminine"
+        },
+        { 
+          text: "Masculine and bold - strong woody and spicy scents", 
+          scores: { boldness: 7, energy: 6 },
+          gender: "masculine",
+          genderStyle: "classic_masculine"
+        },
+        { 
+          text: "Unisex and sophisticated - modern gender-neutral fragrances", 
+          scores: { complexity: 6, boldness: 5 },
+          gender: "unisex",
+          genderStyle: "modern_unisex"
+        },
+        { 
+          text: "Unique to me - I transcend traditional scent categories", 
+          scores: { complexity: 8, boldness: 6 },
+          gender: "nonbinary",
+          genderStyle: "individualistic"
+        }
+      ]
     }
   ];
 
   const consultationQuestions = [
+    {
+      id: "gender_expression",
+      question: "How do you prefer to express your gender identity through fragrance? (This helps us recommend the perfect scents for you)",
+      type: "select",
+      options: [
+        "Feminine - I love traditionally feminine scents (florals, sweet, powdery)",
+        "Masculine - I prefer traditionally masculine scents (woody, spicy, fresh)", 
+        "Unisex - I enjoy sophisticated gender-neutral fragrances",
+        "Fluid - I like exploring different scent personalities based on my mood",
+        "Nonbinary - I prefer scents that don't conform to gender norms",
+        "Prefer not to specify - Gender doesn't influence my scent choices"
+      ]
+    },
     {
       id: "childhood_memory",
       question: "Describe a cherished childhood memory where you felt completely safe and happy. What scents surrounded you in that moment?",
@@ -162,15 +208,17 @@ function App() {
     }
   };
 
-  // ✅ FIXED: Updated Claude AI Integration - using Railway backend with proper email handling
+  // UPDATED: Personal Perfumer Integration with LOCAL backend for testing
   const generateAIRecommendations = async (profile, consultationData) => {
     setIsGeneratingAI(true);
     
     try {
-      console.log('🤖 Calling Railway backend for AI recommendations...');
+      console.log('🌸 Calling LOCAL backend for personalized perfumer recommendations...');
+      console.log('Profile with gender:', profile);
       console.log('Consultation data being sent:', consultationData);
       
-      const response = await fetch('https://scent-quiz-backend-production.up.railway.app/api/generate-recommendations', {
+      // CHANGED: Using local backend URL for testing
+      const response = await fetch('http://localhost:8080/api/generate-recommendations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -192,15 +240,15 @@ function App() {
       const data = await response.json();
       
       if (data.success && data.recommendations) {
-        console.log('✅ Claude AI recommendations generated successfully');
+        console.log('✅ Personal perfumer recommendations generated successfully');
         return data.recommendations;
       } else {
         throw new Error('Invalid response from backend');
       }
       
     } catch (error) {
-      console.error('❌ Error generating AI recommendations:', error);
-      alert(`Error generating AI recommendations: ${error.message}\n\nPlease check your internet connection and try again.`);
+      console.error('❌ Error generating personal perfumer recommendations:', error);
+      alert(`Error generating personal perfumer recommendations: ${error.message}\n\nPlease check your internet connection and try again.`);
       return null;
     } finally {
       setIsGeneratingAI(false);
@@ -215,6 +263,15 @@ function App() {
       ));
     });
     setScores(newScores);
+
+    // Capture gender information if present
+    if (option.gender) {
+      setUserProfile({
+        ...userProfile,
+        gender: option.gender,
+        genderStyle: option.genderStyle
+      });
+    }
 
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
@@ -241,7 +298,8 @@ function App() {
         email: userEmail,
         date: new Date().toISOString(),
         type: 'teaser_quiz',
-        scores: scores
+        scores: scores,
+        userProfile: userProfile
       });
       localStorage.setItem('scentEmails', JSON.stringify(emails));
 
@@ -258,17 +316,19 @@ function App() {
     });
   };
 
-  // ✅ FIXED: Updated consultation completion with proper email handling
+  // Enhanced consultation completion with gender handling
   const handleConsultationNext = async () => {
     if (currentConsultationQuestion < consultationQuestions.length - 1) {
       setCurrentConsultationQuestion(currentConsultationQuestion + 1);
     } else {
       setIsSubmitting(true);
       
-      // ✅ CRITICAL FIX: Add email to consultation data for backend
+      // Include all gender information in consultation data
       const consultationWithEmail = {
         ...consultationResponses,
-        email: userEmail
+        email: userEmail,
+        teaser_gender: userProfile.gender,
+        teaser_gender_style: userProfile.genderStyle
       };
       
       // Submit full consultation data to Google Sheets
@@ -276,15 +336,16 @@ function App() {
         email: userEmail,
         source: 'full_consultation',
         teaserScores: scores,
-        consultationData: consultationWithEmail  // ✅ FIXED: Include email
+        consultationData: consultationWithEmail
       });
 
       // Store locally as backup
       const consultations = JSON.parse(localStorage.getItem('fullConsultations') || '[]');
       consultations.push({
         email: userEmail,
-        responses: consultationWithEmail,  // ✅ FIXED: Include email
+        responses: consultationWithEmail,
         teaserScores: scores,
+        userProfile: userProfile,
         date: new Date().toISOString()
       });
       localStorage.setItem('fullConsultations', JSON.stringify(consultations));
@@ -293,19 +354,22 @@ function App() {
       setShowFullConsultation(false);
       setShowThankYou(true);
 
-      // ✅ FIXED: Generate AI recommendations with email included
-      const profile = generatePersonalizedResult().profile;
-      const recommendations = await generateAIRecommendations(profile, consultationWithEmail);
+      // Generate personal perfumer recommendations with complete gender profile
+      const fullProfile = {
+        ...generatePersonalizedResult().profile,
+        gender: userProfile.gender,
+        genderStyle: userProfile.genderStyle
+      };
+      
+      const recommendations = await generateAIRecommendations(fullProfile, consultationWithEmail);
       
       if (recommendations) {
         setAiRecommendations(recommendations);
-        // Show AI results after thank you
         setTimeout(() => {
           setShowThankYou(false);
           setShowAIResults(true);
         }, 3000);
       } else {
-        // Reset after 5 seconds if no AI
         setTimeout(() => {
           restart();
         }, 5000);
@@ -320,10 +384,12 @@ function App() {
       warmth: Math.round(scores.warmth),
       boldness: Math.round(scores.boldness),
       timePreference: Math.round(scores.timePreference),
-      natureConnection: Math.round(scores.natureConnection)
+      natureConnection: Math.round(scores.natureConnection),
+      gender: userProfile.gender,
+      genderStyle: userProfile.genderStyle
     };
 
-    // Enhanced personalized descriptions
+    // Enhanced personalized descriptions with gender consideration
     let description = "Your unique scent profile reveals someone who gravitates toward ";
     
     if (profile.energy > 7) description += "vibrant, energizing fragrances that capture life's bright moments ";
@@ -344,9 +410,50 @@ function App() {
     else if (profile.boldness < 4) description += ", creating an intimate aura that draws people closer";
     else description += ", striking the perfect balance between presence and subtlety";
 
-    // Enhanced recommendation logic
+    // Enhanced gender-aware recommendation logic
     const recommendations = [];
     
+    // Gender-specific recommendations
+    if (profile.gender === 'feminine') {
+      if (profile.warmth > 7) {
+        recommendations.push("Lancôme La Vie Est Belle - Sweet and sophisticated femininity");
+      }
+      if (profile.complexity > 6) {
+        recommendations.push("Chanel No. 5 - Timeless feminine complexity");
+      }
+      if (profile.boldness > 7) {
+        recommendations.push("Tom Ford Black Orchid - Bold feminine mystique");
+      }
+    } else if (profile.gender === 'masculine') {
+      if (profile.boldness > 7) {
+        recommendations.push("Tom Ford Oud Wood - Bold masculine sophistication");
+      }
+      if (profile.energy > 6) {
+        recommendations.push("Acqua di Parma Colonia - Fresh masculine energy");
+      }
+      if (profile.warmth > 6) {
+        recommendations.push("Creed Aventus - Warm masculine confidence");
+      }
+    } else if (profile.gender === 'unisex') {
+      if (profile.complexity > 6) {
+        recommendations.push("Le Labo Santal 33 - Modern unisex sophistication");
+      }
+      if (profile.natureConnection > 7) {
+        recommendations.push("Maison Margiela REPLICA Beach Walk - Gender-neutral escape");
+      }
+      if (profile.boldness > 6) {
+        recommendations.push("Byredo Gypsy Water - Unisex bohemian spirit");
+      }
+    } else if (profile.gender === 'nonbinary') {
+      if (profile.complexity > 7) {
+        recommendations.push("Comme des Garçons Incense - Transcendent and unique");
+      }
+      if (profile.boldness > 6) {
+        recommendations.push("Maison Francis Kurkdjian Baccarat Rouge 540 - Beyond categories");
+      }
+    }
+
+    // Universal recommendations based on scent profile
     if (profile.energy > 6 && profile.natureConnection > 6) {
       recommendations.push("Hermès Un Jardin Sur Le Toit - A rooftop garden in Paris, fresh and green with sparkling energy");
     }
@@ -356,19 +463,10 @@ function App() {
     if (profile.boldness < 5 && profile.warmth < 5) {
       recommendations.push("Le Labo Thé Matcha 26 - Clean matcha tea with subtle sophistication");
     }
-    if (profile.natureConnection > 7) {
-      recommendations.push("Diptyque Philosykos - The scent of fig trees in Mediterranean sunshine");
-    }
-    if (profile.boldness > 7 && profile.complexity > 6) {
-      recommendations.push("Maison Francis Kurkdjian Baccarat Rouge 540 - Mysterious and unforgettable");
-    }
-    if (profile.warmth > 6 && profile.energy < 5) {
-      recommendations.push("Byredo Gypsy Water - Vanilla and sandalwood for cozy sophistication");
-    }
 
     // Always ensure we have at least 3 recommendations
     while (recommendations.length < 3) {
-      recommendations.push("🤖 AI-powered personalized recommendations available in your full consultation");
+      recommendations.push("🌸 Personal perfumer recommendations available in your full consultation");
     }
 
     return { profile, description, recommendations };
@@ -384,6 +482,10 @@ function App() {
       timePreference: 5,
       natureConnection: 5
     });
+    setUserProfile({
+      gender: null,
+      genderStyle: null
+    });
     setShowEmailCapture(false);
     setShowResult(false);
     setShowFullConsultation(false);
@@ -395,12 +497,12 @@ function App() {
     setAiRecommendations(null);
   };
 
-  // ✅ Enhanced AI Results screen
+  // Enhanced Personal Perfumer Results screen
   if (showAIResults && aiRecommendations) {
     return (
       <div className="App">
         <div className="result-container">
-          <h1>🤖 Your AI-Powered Scent Recommendations</h1>
+          <h1>🌸 Your Personal Perfumer's Recommendations</h1>
           <p className="description">{aiRecommendations.summary}</p>
 
           <div className="ai-recommendations">
@@ -412,6 +514,7 @@ function App() {
                 <p className="description">{rec.description}</p>
                 <p className="notes"><strong>Notes:</strong> {rec.notes.join(', ')}</p>
                 <p className="scenario"><strong>Perfect for:</strong> {rec.scenario}</p>
+                {rec.genderAppeal && <p className="gender-appeal"><strong>Gender Appeal:</strong> {rec.genderAppeal}</p>}
                 <p className="reasoning"><strong>Why it's perfect for you:</strong> {rec.reasoning}</p>
               </div>
             ))}
@@ -435,27 +538,27 @@ function App() {
     );
   }
 
-  // ✅ Enhanced Thank you screen
+  // Enhanced Thank you screen
   if (showThankYou) {
     return (
       <div className="App">
         <div className="thank-you-container">
           <div className="thank-you-content">
-            <h1>✨ Generating Your AI Recommendations ✨</h1>
+            <h1>✨ Your Personal Perfumer is Creating Your Recommendations ✨</h1>
             <p>Your consultation has been submitted successfully!</p>
             {isGeneratingAI && (
               <div className="ai-loading">
-                <p>🤖 Claude AI is analyzing your responses...</p>
+                <p>🌸 Your personal perfumer is analyzing your responses and preferences...</p>
                 <div className="loading-spinner"></div>
               </div>
             )}
             <div className="thank-you-details">
               <p><strong>What's happening:</strong></p>
               <ul>
-                <li>✅ Your data is saved in Google Sheets</li>
-                <li>🤖 AI is creating personalized recommendations</li>
-                <li>📧 Beautiful email being prepared for: {userEmail}</li>
-                <li>🚀 Using Railway backend for processing</li>
+                <li>✅ Your unique preferences are captured and analyzed</li>
+                <li>🌸 Your personal perfumer is creating personalized recommendations</li>
+                <li>📧 Email being prepared for: {userEmail}</li>
+                <li>🚀 Using local backend for testing</li>
               </ul>
             </div>
           </div>
@@ -524,7 +627,7 @@ function App() {
               disabled={!consultationResponses[currentQ.id]?.trim() || isSubmitting}
             >
               {isSubmitting ? 'Submitting...' : 
-               currentConsultationQuestion === consultationQuestions.length - 1 ? '🤖 Get AI Recommendations' : 'Next Question'}
+               currentConsultationQuestion === consultationQuestions.length - 1 ? '🌸 Get Your Personal Scent Recommendations' : 'Next Question'}
             </button>
           </div>
         </div>
@@ -540,7 +643,7 @@ function App() {
           <div className="email-capture">
             <h1>Get Your Personalized Scent Profile</h1>
             <p className="email-description">
-              Enter your email to receive your detailed scent analysis and AI-powered fragrance recommendations.
+              Enter your email to receive your detailed scent analysis and personalized fragrance recommendations.
             </p>
             
             <form onSubmit={handleEmailSubmit} className="email-form">
@@ -579,12 +682,19 @@ function App() {
       <div className="App">
         <div className="result-container">
           <h1>Your Personalized Scent Profile</h1>
+          {result.profile.gender && (
+            <p className="gender-note">
+              Recommendations curated for your {result.profile.gender} scent preferences
+            </p>
+          )}
           <p className="description">{result.description}</p>
 
           <div className="scent-dimensions">
             <h2>Your Scent Dimensions</h2>
             <div className="dimensions-grid">
-              {Object.entries(result.profile).map(([key, value]) => (
+              {Object.entries(result.profile).filter(([key]) => 
+                !['gender', 'genderStyle'].includes(key)
+              ).map(([key, value]) => (
                 <div key={key} className="dimension-item">
                   <div className="dimension-header">
                     <span className="dimension-label">
@@ -613,15 +723,15 @@ function App() {
           </div>
 
           <div className="cta-section">
-            <h3>Want AI-Powered Scent Recommendations?</h3>
-            <p>Get 6 detailed, personalized recommendations from Claude AI based on your memories and preferences.</p>
+            <h3>Complete Your Personalized Scent Consultation</h3>
+            <p>Get 6 detailed, personalized recommendations from your personal perfumer based on your memories, preferences, and gender expression.</p>
             <button 
               className="cta-button"
               onClick={() => setShowFullConsultation(true)}
             >
-              🤖 Get AI Consultation - Free
+              🌸 Get Your Personal Scent Recommendations
             </button>
-            <p className="delivery-note">AI recommendations generated instantly + emailed to you!</p>
+            <p className="delivery-note">Your personal perfumer recommendations generated instantly + emailed to you!</p>
             <button onClick={restart} className="restart-btn">
               Take Quiz Again
             </button>
